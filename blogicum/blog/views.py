@@ -13,7 +13,7 @@ from .forms import UserEditForm, PostForm, CommentForm
 from .models import Category, Post, Comment
 from .utils import get_published_posts
 
-POSTS_PER_PAGE = 10
+POSTS_IN_PAGE = 10
 
 
 class RedirectToUserProfileMixin:
@@ -36,7 +36,7 @@ def annotate_posts(queryset):
     ).order_by('-pub_date')
 
 
-def paginate_queryset(request, queryset, per_page=POSTS_PER_PAGE):
+def paginate_queryset(request, queryset, per_page=POSTS_IN_PAGE):
     paginator = Paginator(queryset, per_page)
     page_number = request.GET.get('page')
     return paginator.get_page(page_number)
