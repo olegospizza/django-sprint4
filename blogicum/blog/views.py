@@ -2,26 +2,49 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
-from django.core.mail import send_mail
 from django.core.paginator import Paginator
-from django.http import HttpResponse, Http404
+from django.http import Http404
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
-from django.utils import timezone
+from django.utils import timezone 
 from django.views.generic.edit import CreateView, UpdateView, DeleteView
 
 from .forms import UserEditForm, PostForm, CommentForm
 from .models import Category, Post, Comment
 from .utils import get_published_posts
 
+POSTS_PER_PAGE = 10
 
-def index(request):
-    post_list = get_published_posts().annotate(
+
+class RedirectToUserProfileMixin:
+    def get_success_url(self):
+        return reverse_lazy('blog:profile', kwargs={
+            'username': self.request.user.username
+        })
+
+
+class RedirectToPostDetailMixin:
+    def get_success_url(self):
+        return reverse_lazy('blog:post_detail', kwargs={
+            'post_id': self.get_object().post.id
+        })
+
+
+def annotate_posts(queryset):
+    return queryset.annotate(
         comment_count=Count('comments')
     ).order_by('-pub_date')
-    paginator = Paginator(post_list, 10)
+
+
+def paginate_queryset(request, queryset, per_page=POSTS_PER_PAGE):
+    paginator = Paginator(queryset, per_page)
     page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    return paginator.get_page(page_number)
+
+
+def index(request):
+    post_list = annotate_posts(get_published_posts())
+    page_obj = paginate_queryset(request, post_list)
     return render(request, 'blog/index.html', {'page_obj': page_obj})
 
 
@@ -50,13 +73,10 @@ def category_posts(request, category_slug):
     category = get_object_or_404(
         Category,
         slug=category_slug,
-        is_published=True)
-    post_list = get_published_posts().filter(
-        category=category
-    ).order_by('-pub_date')
-    paginator = Paginator(post_list, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+        is_published=True
+    )
+    post_list = annotate_posts(get_published_posts().filter(category=category))
+    page_obj = paginate_queryset(request, post_list)
     return render(request, 'blog/category.html', {
         'category': category,
         'page_obj': page_obj
@@ -65,18 +85,15 @@ def category_posts(request, category_slug):
 
 def profile(request, username):
     profile_user = get_object_or_404(User, username=username)
-    if request.user == profile_user:
-        post_list = Post.objects.filter(
-            author=profile_user
-        ).annotate(comment_count=Count('comments')).order_by('-pub_date')
-    else:
-        post_list = get_published_posts().filter(
-            author=profile_user
-        ).annotate(comment_count=Count('comments')).order_by('-pub_date')
 
-    paginator = Paginator(post_list, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    if request.user == profile_user:
+        post_list = annotate_posts(Post.objects.filter(author=profile_user))
+    else:
+        post_list = annotate_posts(
+            get_published_posts().filter(author=profile_user)
+        )
+
+    page_obj = paginate_queryset(request, post_list)
     return render(request, 'blog/profile.html', {
         'profile': profile_user,
         'page_obj': page_obj
@@ -86,12 +103,14 @@ def profile(request, username):
 @login_required
 def add_comment(request, post_id):
     post = get_object_or_404(Post, id=post_id)
-    form = CommentForm(request.POST)
+    form = CommentForm(request.POST or None)
+
     if form.is_valid():
         comment = form.save(commit=False)
         comment.author = request.user
         comment.post = post
         comment.save()
+
     return redirect('blog:post_detail', post_id=post_id)
 
 
@@ -111,7 +130,12 @@ class PostUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         return reverse('blog:post_detail', kwargs={'post_id': self.object.id})
 
 
-class UserUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+class UserUpdateView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    RedirectToUserProfileMixin,
+    UpdateView
+):
     model = User
     form_class = UserEditForm
     template_name = 'blog/user.html'
@@ -122,13 +146,12 @@ class UserUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def get_object(self, queryset=None):
         return self.request.user
 
-    def get_success_url(self):
-        return reverse_lazy('blog:profile', kwargs={
-            'username': self.request.user.username
-        })
 
-
-class PostCreateView(LoginRequiredMixin, CreateView):
+class PostCreateView(
+    LoginRequiredMixin,
+    RedirectToUserProfileMixin,
+    CreateView
+):
     model = Post
     form_class = PostForm
     template_name = 'blog/create.html'
@@ -138,24 +161,19 @@ class PostCreateView(LoginRequiredMixin, CreateView):
         form.instance.pub_date = timezone.now()
         return super().form_valid(form)
 
-    def get_success_url(self):
-        return reverse('blog:profile', kwargs={
-            'username': self.request.user.username
-        })
 
-
-class PostDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
+class PostDeleteView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    RedirectToUserProfileMixin,
+    DeleteView
+):
     model = Post
     template_name = 'blog/create.html'
     pk_url_kwarg = 'post_id'
 
     def test_func(self):
         return self.request.user == self.get_object().author
-
-    def get_success_url(self):
-        return reverse_lazy('blog:profile', kwargs={
-            'username': self.request.user.username
-        })
 
 
 class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
@@ -173,26 +191,15 @@ class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         })
 
 
-class CommentDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
+class CommentDeleteView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    RedirectToPostDetailMixin,
+    DeleteView
+):
     model = Comment
     template_name = 'blog/comment.html'
     pk_url_kwarg = 'comment_id'
 
     def test_func(self):
         return self.request.user == self.get_object().author
-
-    def get_success_url(self):
-        return reverse_lazy('blog:post_detail', kwargs={
-            'post_id': self.get_object().post.id
-        })
-
-
-def test_send_email(request):
-    send_mail(
-        subject='Привет!',
-        message='Это тестовое письмо.',
-        from_email='noreply@example.com',
-        recipient_list=['test@example.com'],
-        fail_silently=False,
-    )
-    return HttpResponse('Письмо отправлено (в файл).')

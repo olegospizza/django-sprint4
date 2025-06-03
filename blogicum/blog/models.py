@@ -92,6 +92,7 @@ class Comment(models.Model):
         Post,
         on_delete=models.CASCADE,
         related_name='comments',
+        verbose_name='Пост комментария',
         null=True
     )
     created_at = models.DateTimeField('Добавлено',
@@ -105,3 +106,6 @@ class Comment(models.Model):
 
     class Meta:
         ordering = ('created_at',)
+
+    def __str__(self):
+        return self.text[:NUMBER_OF_CHARACTERS]
