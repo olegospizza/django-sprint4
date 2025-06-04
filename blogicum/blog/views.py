@@ -1,8 +1,6 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
-from django.core.paginator import Paginator
 from django.http import Http404
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
@@ -11,35 +9,8 @@ from django.views.generic.edit import CreateView, UpdateView, DeleteView
 
 from .forms import UserEditForm, PostForm, CommentForm
 from .models import Category, Post, Comment
-from .utils import get_published_posts
-
-POSTS_IN_PAGE = 10
-
-
-class RedirectToUserProfileMixin:
-    def get_success_url(self):
-        return reverse_lazy('blog:profile', kwargs={
-            'username': self.request.user.username
-        })
-
-
-class RedirectToPostDetailMixin:
-    def get_success_url(self):
-        return reverse_lazy('blog:post_detail', kwargs={
-            'post_id': self.get_object().post.id
-        })
-
-
-def annotate_posts(queryset):
-    return queryset.annotate(
-        comment_count=Count('comments')
-    ).order_by('-pub_date')
-
-
-def paginate_queryset(request, queryset, per_page=POSTS_IN_PAGE):
-    paginator = Paginator(queryset, per_page)
-    page_number = request.GET.get('page')
-    return paginator.get_page(page_number)
+from .mixins import RedirectToPostDetailMixin, RedirectToUserProfileMixin
+from .utils import get_published_posts, annotate_posts, paginate_queryset
 
 
 def index(request):
